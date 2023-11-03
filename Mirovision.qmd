@@ -225,6 +225,7 @@ stan_shows <-
   stan_points |>
   distinct(stan_show, year, round) |>
   arrange(stan_show)
+
 ```
 
 ## Analyse previous contests
