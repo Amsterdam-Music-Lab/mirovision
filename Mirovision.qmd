@@ -1,0 +1,908 @@
+---
+title: MIRoVision scripts
+author: John Ashley Burgoyne
+date: April 2023
+format: html
+---
+
+This Quarto document conducts the analyses and generates the plots for Burgoyne, Spijkervet, and Baker's (2023) MIRoVision paper.
+
+```{r}
+#| label: setup
+library(tidyverse)
+library(fs)
+library(tikzDevice)
+library(cmdstanr)
+setTikzDefaults()
+options(
+  mc.cores = parallel::detectCores(),
+  tikzDefaultEngine = "luatex",
+  tikzLatexPackages =
+    c(
+      getOption("tikzLatexPackages"),
+      "\\usepackage{amsmath,cite,url}\n",
+      "\\usepackage[T1]{fontenc}",
+      "\\renewcommand{\\sfdefault}{phv}\n",
+      "\\tikzset{every picture/.style={/utils/exec={\\sffamily}}}\n"
+    )
+)
+```
+
+```{r}
+#| label: aml-theme
+theme_set(ggthemes::theme_tufte(base_family = "Fira Sans"))
+aml_palette <- c("#D843E2", "#39D7B8", "#FFB14C",
+                 "#FA5577", "#0CC7F1", "#2B2BEE",
+                 "#212529", "#BDBEBF", "#F5F5F6")
+options(
+  ggplot2.discrete.colour = aml_palette,
+  ggplot2.discrete.fill = aml_palette
+)
+```
+
+## Load data
+
+The raw data is in RDA format, with the eventual goal of making an R package.
+
+```{r}
+# TODO: These should be normalised
+countries <- readRDS("data/countries.rda")
+contestants <- readRDS("data/contestants.rda")
+votes <- readRDS("data/votes.rda")
+jurors <- readRDS("data/jurors.rda")
+```
+
+We normalise the data and add integer primary keys for Stan, using order of appearance where possible, but we do not use them as the standard foreign key in other tables.
+In order to simplify the data representation, we also restrict the contests to 1975 and later, for which there is a common scoring format.
+In order to support earlier years, there would need to be an extra table combining years and valid scores, and only long-format point tables would be possible.
+
+```{r}
+stan_countries <-
+  contestants |>
+  mutate(
+    across(
+      c(semifinal_number, semifinal_running_order, final_running_order),
+      \(v) replace_na(v, .Machine$integer.max)
+    ),
+    contestant =
+      dense_rank(
+        pick(
+          year,
+          semifinal_number,
+          semifinal_running_order,
+          final_running_order
+        )
+      )
+  ) |>
+  group_by(country) |>
+  summarise(first_contestant = min(contestant)) |>
+  mutate(stan_country = dense_rank(first_contestant), .before = 1) |>
+  select(-first_contestant) |>
+  inner_join(countries, by = "country") |>
+  arrange(stan_country)
+
+stan_contestants <-
+  contestants |>
+  filter(year >= 1975L, year != 2020L) |>
+  mutate(
+    across(
+      c(semifinal_number, semifinal_running_order, final_running_order),
+      \(v) replace_na(v, .Machine$integer.max)
+    ),
+    stan_contestant =
+      dense_rank(
+        pick(
+          year,
+          semifinal_number,
+          semifinal_running_order,
+          final_running_order
+        )
+      ),
+    .before = 1
+  ) |>
+  select(
+    stan_contestant,
+    year,
+    country,
+    artist = performer,
+    title = song,
+    composers,
+    lyricists,
+    lyrics,
+    youtube_url
+  ) |>
+  arrange(stan_contestant)
+
+stan_shows <-
+  votes |>
+  filter(year >= 1975L) |>
+  distinct(year, round) |>
+  mutate(
+    round =
+      fct_relevel(
+        round,
+        "semi-final",
+        "semi-final-1",
+        "semi-final-2",
+        "final"
+      )
+  ) |>
+  mutate(stan_show = dense_rank(pick(year, round)), .before = 1) |>
+  arrange(stan_show)
+
+stan_performances <-
+  contestants |>
+  filter(year >= 1975L, year != 2020L) |>
+  select(
+    year,
+    country,
+    semifinal_number,
+    semifinal_running_order,
+    final_running_order
+  ) |>
+  pivot_longer(
+    semifinal_running_order:final_running_order,
+    names_to = "type",
+    names_pattern = "(.*)_running_order",
+    values_to = "running_order"
+  ) |>
+  filter(!is.na(running_order)) |>
+  mutate(
+    round =
+      factor(
+        case_when(
+          type == "semifinal" & semifinal_number == 0L ~ "semi-final",
+          type == "semifinal" & semifinal_number == 1L ~ "semi-final-1",
+          type == "semifinal" & semifinal_number == 2L ~ "semi-final-2",
+          type == "final" ~ "final"
+        ),
+        levels = c("semi-final", "semi-final-1", "semi-final-2", "final")
+      )
+  ) |>
+  mutate(stan_performance = dense_rank(pick(year, round, running_order))) |>
+  arrange(stan_performance)
+
+###
+
+stan_points <-
+  votes |>
+  filter(year >= 1975) |>
+  mutate(total_points = ifelse(is.na(jury_points), total_points, NA)) |>
+  rename_at(vars(total_points:jury_points), str_remove, "_points") |>
+  pivot_longer(
+    total:jury,
+    names_to = "type",
+    values_to = "points",
+    values_drop_na = TRUE
+  ) |>
+  mutate(
+    stan_from_country = dense_rank(from_country),
+    stan_to_country = dense_rank(to_country),
+    round =
+      fct_relevel(round, "semi-final", "semi-final-1", "semi-final-2", "final")
+  ) |>
+  arrange(year, round) |>
+  group_by(year, round) |>
+  mutate(stan_show = cur_group_id()) |>
+  ungroup() |>
+
+  arrange(year, to_country) |>
+  group_by(year, to_country) |>
+  mutate(stan_contestant = cur_group_id()) |>
+  ungroup() |>
+  arrange(year, round, from_country, type, desc(points)) |>
+  group_by(year, round, from_country, type) |>
+  mutate(stan_ballot = cur_group_id()) |>
+  ungroup() |>
+  select(
+    stan_ballot, stan_show, year, round, stan_from_country, from_country, type,
+    stan_contestant, stan_to_country, to_country,
+    points
+  ) |>
+  arrange(stan_ballot, desc(points))
+
+stan_votes <-
+  stan_points |>
+  group_by(
+    stan_vote,
+    stan_show, year, round,
+    stan_from_country, from_country,
+    type
+  ) |>
+  summarise(
+    n_alternatives = n(),
+    n_ranked = sum(points > 0)
+  ) |>
+  ungroup() |>
+  arrange(stan_vote)
+
+stan_shows <-
+  stan_points |>
+  distinct(stan_show, year, round) |>
+  arrange(stan_show)
+```
+
+## Analyse previous contests
+
+### Softmax
+
+```{r}
+softmax_points <-
+  stan_points |>
+  group_by(stan_contestant, year, stan_to_country, to_country) |>
+  summarise(points = sum(points), .groups = "drop") |>
+  arrange(stan_contestant)
+softmax_votes <-
+  stan_points |>
+  select(stan_vote, stan_show, year, round, stan_contestant) |>
+  arrange(stan_vote, stan_contestant) |>
+  nest(stan_contestants = stan_contestant) |>
+  count(stan_show, year, round, stan_contestants, name = "n_votes") |>
+  mutate(n_contestants = map_int(stan_contestants, nrow))
+```
+
+```{r}
+softmax_model <-
+  cmdstan_model(
+    "inst/stan/eurovision-softmax.stan",
+    cpp_options = list(stan_threads = TRUE)
+  )
+if (file_exists("inst/stan/softmax-fit.rds")) {
+  softmax_fit <- readRDS("inst/stan/softmax-fit.rds")
+} else {
+  softmax_fit <-
+    softmax_model$sample(
+      data =
+        list(
+          I = nrow(softmax_votes),
+          J = nrow(stan_countries),
+          M = softmax_votes |> summarise(M = sum(n_contestants)) |> pull(M),
+          N = nrow(stan_contestants),
+          jj = stan_contestants |> pull(stan_to_country),
+          nn =
+            softmax_votes |>
+            select(stan_contestants) |>
+            unnest(stan_contestants) |>
+            pull(stan_contestant),
+          NN = softmax_votes |> pull(n_contestants),
+          ww = softmax_votes |> pull(n_votes),
+          xx = softmax_points |> pull(points)
+        ),
+      chains = 4,
+      parallel_chains = 4,
+      threads_per_chain = 2,
+      iter_warmup = 1000,
+      iter_sampling = 1000,
+      refresh = 100
+    )
+  softmax_fit$save_object("inst/stan/softmax-fit.rds")
+}
+```
+
+### Ratings (Rasch model)
+
+```{r}
+contest_model <-
+  cmdstan_model(
+    "inst/stan/eurovision.stan",
+    cpp_options = list(stan_threads = TRUE)
+  )
+if (file_exists("inst/stan/contest-fit.rds")) {
+  contest_fit <- readRDS("inst/stan/contest-fit.rds")
+} else {
+  contest_fit <-
+    contest_model$sample(
+      data =
+        list(
+          I = nrow(stan_shows),
+          J = nrow(stan_countries),
+          M = nrow(stan_points),
+          N = nrow(stan_contestants),
+          ii = stan_points |> pull(stan_show),
+          jj = stan_contestants |> pull(stan_to_country),
+          nn = stan_points |> pull(stan_contestant),
+          xx = stan_points |> pull(points)
+        ),
+      chains = 4,
+      parallel_chains = 4,
+      threads_per_chain = 2,
+      iter_warmup = 1000,
+      iter_sampling = 1000,
+      refresh = 100
+    )
+  contest_fit$save_object("inst/stan/contest-fit.rds")
+}
+```
+
+### Condorcet model
+
+```{r}
+stan_points |>
+  select(year, round, from_country, type, to_1 = to_country, p_1 = points) |>
+  inner_join(
+    stan_points |>
+    select(year, round, from_country, type, to_2 = to_country, p_2 = points)
+  ) |>
+  group_by(year, round, to_1, to_2) |>
+  filter(to_1 != to_2) |>
+  summarise(
+    points = sum(p_1),
+    net =
+      sum(
+        case_when(
+          p_1 > p_2 ~ 1L,
+          p_1 < p_2 ~ -1L,
+          TRUE ~ 0L
+        )
+      )
+  ) |>
+  summarise(
+    eurovision = max(points),
+    borda = sum(net),
+    copeland =
+      sum(
+        case_when(
+          net > 0 ~ 1L,
+          net < 0 ~ -1L,
+          TRUE ~ 0L
+        )
+      )
+  ) |>
+  mutate(max_copeland = n() - 1L) |>
+  filter(
+    round == "final",
+    #
+    # max(copeland) == max(max_copeland),
+    # eurovision == max(eurovision),
+    # copeland != max(copeland)
+    #
+    copeland == max(copeland)
+    | eurovision == max(eurovision)
+    | borda == max(borda)
+  ) |>
+  group_by(year) |>
+  filter(n() > 1L) |>
+  arrange(year, desc(copeland), desc(borda), desc(eurovision)) |>
+  print(n = Inf)
+```
+
+```{r}
+condorcet_model <-
+  cmdstan_model(
+    "inst/stan/condorcet.stan",
+    cpp_options = list(stan_threads = TRUE)
+  )
+# if (file_exists("inst/stan/condorcet-fit.rds")) {
+#   condorcet_fit <- readRDS("inst/stan/condorcet-fit.rds")
+# } else {
+  condorcet_fit <-
+    condorcet_model$sample(
+
+      data =
+        list(
+          I = nrow(stan_votes),
+          J = nrow(stan_countries),
+          M = nrow(stan_points),
+          N = nrow(stan_contestants),
+          jj = stan_contestants |> pull(stan_to_country),
+          kk = stan_votes |> pull(n_alternatives),
+          nn = stan_points |> pull(stan_to_country)
+        ),
+      chains = 4,
+      parallel_chains = 4,
+      threads_per_chain = 2,
+      iter_warmup = 1000,
+      iter_sampling = 1000,
+      refresh = 100
+    )
+  condorcet_fit$save_object("inst/stan/condorcet-fit.rds")
+# }
+```
+
+```{r}
+contest_fit$draws("beta_contestant", format = "df") |>
+  select(-.chain, -.iteration) |>
+  pivot_longer(-.draw, names_to = "variable", values_to = "posterior") |>
+  separate_wider_regex(
+    variable,
+    patterns = c("beta_contestant\\[", stan_contestant = "\\d+", "\\]")
+  ) |>
+  inner_join(
+    contest_fit$draws("contestant_prior", format = "df") |>
+    select(-.chain, -.iteration) |>
+    pivot_longer(-.draw, names_to = "variable", values_to = "prior") |> separate_wider_regex(
+      variable,
+      patterns = c("contestant_prior\\[", stan_contestant = "\\d+", "\\]")
+    )
+  ) |>
+  mutate(stan_contestant = as.integer(stan_contestant)) |>
+  group_by(stan_contestant) |>
+  summarise(KL = FNN::KL.divergence(posterior, prior)[10], n = n()) |>
+  ungroup() |>
+  summarise(MI = sum(n * KL) / sum(n), R = 1 - exp(-2 * MI))
+```
+
+```{r}
+condorcet_fit$draws("beta_contestant", format = "df") |>
+  select(-.chain, -.iteration) |>
+  pivot_longer(-.draw, names_to = "variable", values_to = "posterior") |>
+  separate_wider_regex(
+    variable,
+    patterns = c("beta_contestant\\[", stan_contestant = "\\d+", "\\]")
+  ) |>
+  inner_join(
+    condorcet_fit$draws("contestant_prior", format = "df") |>
+    select(-.chain, -.iteration) |>
+    pivot_longer(-.draw, names_to = "variable", values_to = "prior") |> separate_wider_regex(
+      variable,
+      patterns = c("contestant_prior\\[", stan_contestant = "\\d+", "\\]")
+    )
+  ) |>
+  mutate(stan_contestant = as.integer(stan_contestant)) |>
+  group_by(stan_contestant) |>
+  summarise(KL = FNN::KL.divergence(posterior, prior)[10], n = n()) |>
+  ungroup() |>
+  summarise(MI = sum(n * KL) / sum(n), R = 1 - exp(-2 * MI))
+```
+
+### Plots
+
+```{r}
+stan_contestants |>
+  bind_cols(contest_fit$summary("beta_contestant")) |>
+  mutate(across(mean:q95, \(x) 10 * x / log(10))) |>
+  ggplot(aes(median, final_points)) +
+  geom_point() +
+  geom_smooth() +
+  facet_wrap(~ year, scales = "free_y")
+```
+
+```{r}
+tikz("vignettes/ismir-2023/scores.tex", width = 3, height = 2)
+stan_contestants |>
+  bind_cols(condorcet_fit$summary("beta_contestant")) |>
+  mutate(across(mean:q95, \(x) 10 * x / log(10))) |>
+  filter(year == 2019L) |>
+  ggplot(aes(median, final_points)) +
+  geom_point() +
+  geom_smooth() +
+  ggthemes::theme_tufte(base_size = 9, base_family = "sans") +
+  labs(x = "Song Quality (cantobels)", y = "Final Eurovision Score")
+dev.off()
+```
+
+```{r}
+tikz("vignettes/ismir-2023/countries.tex", width = 3, height = 5)
+countries |>
+  arrange(country) |>
+  bind_cols(
+    condorcet_fit$summary("beta_country") |>
+    transmute(quality = median, q5, q95) |>
+    mutate(across(everything(), \(x) 10 * x / log(10)))
+  ) |>
+  mutate(
+    country = fct_reorder(country, quality),
+    region =
+      fct_relevel(
+        region,
+        "Northern Europe",
+        "Eastern Europe",
+        "Southern Europe",
+        "Western Europe",
+        "Non-European"
+      )
+  ) |>
+  ggplot(
+    aes(
+      country,
+      quality,
+      ymin = q5,
+      ymax = q95,
+      label = country,
+      colour = region
+    )
+  ) +
+  geom_hline(yintercept = 0, colour = "#BDBEBF") +
+  geom_linerange() +
+  geom_label(size = 1.5, fontface = "bold", label.size = 0) +
+  scale_x_discrete(labels = NULL) +
+  scale_y_continuous(
+    breaks = seq(-4, 4, 2),
+    labels = c("--4", "--2", "0", "2", "4")
+  ) +
+  scale_colour_manual(
+    values =
+      c(
+        `Northern Europe` = "#39D7B8",
+        `Eastern Europe` = "#FFB14C",
+        `Southern Europe` = "#FA5577",
+        `Western Europe` = "#D843E2",
+        `Non-European` = "#BDBEBF"
+      ),
+    guide = guide_legend(ncol = 1)
+  ) +
+  labs(x = NULL, y = NULL, colour = NULL) +
+  coord_flip() +
+  ggthemes::theme_tufte(base_size = 9, base_family = "sans") +
+  theme(
+    panel.grid.major.x = element_line(colour = "#BDBEBF", linetype = 3),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = c(0.0, 1.0),
+    legend.justification = c(0.0, 1.0),
+    legend.background = element_rect(fill = "white", colour = "white")
+  )
+dev.off()
+```
+
+```{r}
+plot_dat <-
+  stan_contestants |>
+  arrange(stan_contestant) |>
+  bind_cols(
+    condorcet_fit$summary("beta_contestant") |>
+      transmute(quality = 10 * median / log(10))
+  ) |>
+  mutate(
+    region =
+      fct_relevel(
+        region,
+        "Northern Europe",
+        "Eastern Europe",
+        "Southern Europe",
+        "Western Europe",
+        "Non-European"
+      )
+  )
+tikz("vignettes/ismir-2023/history.tex", width = 10, height = 6)
+plot_dat |>
+  ggplot(
+    aes(
+      x = year,
+      y = quality,
+      label = to_country,
+      group = to_country,
+      colour = region
+    )
+  ) +
+  geom_line(
+    data = plot_dat |> complete(year, to_country),
+    colour = "#F5F5F6"
+  ) +
+  geom_hline(yintercept = 0, colour = "#BDBEBF") +
+  geom_text(
+    data = plot_dat |> filter(!is_winner),
+    size = 1.5,
+    alpha = 0.7,
+    fontface = "bold"
+  ) +
+  geom_label(
+    data = plot_dat |> filter(is_winner),
+    size = 1.5,
+    alpha = 0.7,
+    fontface = "bold"
+  ) +
+  scale_y_continuous(
+    breaks = seq(-20, 20, 5),
+    # labels = c("--3", "--2", "--1", "0", "1", "2", "3")
+  ) +
+  scale_colour_manual(
+    values =
+      c(
+        `Northern Europe` = "#39D7B8",
+        `Eastern Europe` = "#FFB14C",
+        `Southern Europe` = "#FA5577",
+        `Western Europe` = "#D843E2",
+        `Non-European` = "#BDBEBF"
+      ),
+    guide = guide_legend(ncol = 3)
+  ) +
+  labs(x = NULL, y = NULL, colour = NULL) +
+  ggthemes::theme_tufte(base_size = 9, base_family = "sans") +
+  theme(
+    panel.grid.major.y = element_line(colour = "#BDBEBF", linetype = 3),
+    axis.ticks.y = element_blank(),
+    legend.position = c(0.05, 0.02),
+    legend.justification = c(0.0, 0.0),
+    legend.background = element_rect(fill = "white", colour = "white")
+  )
+dev.off()
+```
+
+### Investigating the thresholds
+
+```{r}
+stan_votes |>
+  distinct(stan_show, year, round) |>
+  inner_join(
+    contest_fit$summary("delta") |>
+      separate_wider_regex(
+        variable,
+        patterns =
+          c("delta\\[", threshold = "\\d+", ",", stan_show = "\\d+", "\\]")
+      ) |>
+      mutate(across(threshold:stan_show, as.integer)),
+    by = "stan_show"
+  ) |>
+  filter(round == "final") |>
+  select(year, threshold, delta = median) |>
+  ggplot(aes(year, delta, colour = factor(threshold))) + geom_line()
+  # (\(d) bind_rows(d, tibble(year = d$year, threshold = 0, delta = 0)))() |>
+  # mutate(score = c(0:8, 10L, 12L)[threshold + 1]) |>
+  # crossing(beta = seq(-2, 2, 0.01)) |>
+  # mutate(
+  #   alpha = c(0, rep(1, 8), rep(2, 2))[threshold + 1],
+  #   theta_raw = alpha * (beta - delta)
+  # ) |>
+  # group_by(year, beta) |>
+  # arrange(score) |>
+  # mutate(
+  #   theta = cumsum(theta_raw),
+  #   p = exp(theta) / sum(exp(theta))
+  # ) |>
+  # summarise(E = sum(p * score)) |>
+  # ggplot(aes(beta, E, colour = year, group = year)) +
+  # geom_line() +
+  # scale_y_continuous(limits = c(0, 12), breaks = seq(0, 12, 2))
+```
+
+## Analayse juror-level data
+
+The juror data needs to be processed separately.
+
+```{r}
+juror_points <-
+  jurors |>
+  inner_join(stan_shows) |>
+  inner_join(
+    stan_countries |>
+    select(stan_from_country = stan_country, from_country = country)
+  ) |>
+  inner_join(stan_contestants, by = c("year", "to_country")) |>
+  mutate(juror_vote = row_number()) |>
+  pivot_longer(
+    A:E,
+    names_to = "juror",
+    values_to = "rank",
+    values_drop_na = TRUE
+  ) |>
+  transmute(
+    juror_vote,
+    juror_show = dense_rank(stan_show),
+    year,
+    round,
+    juror_from_country = dense_rank(stan_from_country),
+    from_country,
+    juror,
+    juror_contestant = dense_rank(stan_contestant),
+    juror_to_country = dense_rank(stan_to_country),
+    to_country,
+    rank
+  )
+```
+
+Then we fit a kind of 2PL model.
+
+```{r}
+juror_model <-
+  cmdstan_model(
+    "inst/stan/jurors.stan",
+    cpp_options = list(stan_threads = TRUE)
+  )
+# if (file_exists("inst/stan/juror-fit.rds")) {
+#   juror_fit <- readRDS("inst/stan/juror-fit.rds")
+# } else {
+  juror_fit <-
+    juror_model$sample(
+      data =
+        list(
+          I = juror_points |> pull(juror_show) |> max(),
+          J = juror_points |> pull(juror_to_country) |> max(),
+          M = nrow(juror_points),
+          N = juror_points |> pull(juror_contestant) |> max(),
+          ii = juror_points |> pull(juror_show),
+          nn = juror_points |> pull(juror_contestant),
+          jj =
+            juror_points |>
+            distinct(juror_contestant, juror_to_country) |>
+            arrange(juror_contestant) |>
+            pull(juror_to_country),
+          xx = juror_points |> mutate(xx = 26 - rank) |> pull(xx)
+        ),
+      chains = 4,
+      parallel_chains = 4,
+      threads_per_chain = 2,
+      iter_warmup = 1000,
+      iter_sampling = 1000,
+      refresh = 100
+    )
+  contest_fit$save_object("inst/stan/juror-fit.rds")
+# }
+```
+
+### Condorcet analysis
+
+```{r}
+juror_points |>
+  select(year, round, from_country, juror, to_1 = to_country, r_1 = rank) |>
+  inner_join(
+    juror_points |>
+    select(year, round, from_country, juror, to_2 = to_country, r_2 = rank)
+  ) |>
+  group_by(year, round, to_1, to_2) |>
+  filter(to_1 != to_2) |>
+  summarise(
+    net =
+      sum(
+        case_when(
+          r_1 < r_2 ~ 1L,
+          r_1 > r_2 ~ -1L,
+          TRUE ~ 0L
+        )
+      )
+  ) |>
+  summarise(
+    borda = sum(net),
+    copeland =
+      sum(
+        case_when(
+          net > 0 ~ 1L,
+          net < 0 ~ -1L,
+          TRUE ~ 0L
+        )
+      )
+  ) |>
+  mutate(max_copeland = n() - 1L) |>
+  filter(
+    round == "final",
+    #
+    # max(copeland) == max(max_copeland),
+    # copeland != max(copeland)
+    #
+    copeland == max(copeland)
+    | borda == max(borda)
+  ) |>
+  arrange(year, desc(copeland), desc(borda)) |>
+  print(n = Inf)
+```
+
+### Plots
+
+```{r}
+tikz("vignettes/ismir-2023/jury.tex", width = 3, height = 2)
+juror_fit$summary("scores") |>
+  transmute(rank = 26 - row_number(), median, q5, q95) |>
+  bind_rows(tibble_row(rank = 26, median = 0, q5 = 0, q95 = 0)) |>
+  ggplot(aes(rank, median, ymin = q5, ymax = q95)) +
+  geom_pointrange(size = 0.25) +
+  scale_x_continuous(breaks = seq(1, 26, 5)) +
+  scale_y_continuous(breaks = seq(0, 12, 2)) +
+  labs(x = "Rank", y = "Ideal Score") +
+  ggthemes::theme_tufte(base_size = 9, base_family = "sans")
+dev.off()
+```
+
+## Simulate contests
+
+```{r}
+contest_fit$draws("beta_contestant", format = "df") |>
+  select(`beta_contestant[1067]`:`beta_contestant[1353]`) |>
+  mutate(across(everything(), sample)) |>
+  mutate(sim = row_number()) |>
+  pivot_longer(-sim, names_to = "stan_contestant", values_to = "quality") |>
+  mutate(stan_contestant = as.integer(str_sub(stan_contestant, 17, -2))) |>
+  inner_join(
+    stan_contestants |>
+    select(stan_contestant, year, country = to_country, country_name)
+  ) |>
+  group_by(year, sim) |>
+  mutate(is_winner = quality == max(quality)) |>
+  group_by(stan_contestant, year, country, country_name) |>
+  summarise(p_win = mean(is_winner)) |>
+  filter(p_win >= 0.005) |>
+  arrange(year, desc(p_win)) |>
+  ungroup() |>
+  select(year, country_name, p_win) |>
+  print(n = Inf)
+```
+
+```{r}
+win_probs <-
+  contest_fit$draws("beta_contestant", format = "df") |>
+  # mutate(across(everything(), sample)) |>
+  mutate(sim = row_number()) |>
+  pivot_longer(-sim, names_to = "stan_contestant", values_to = "quality") |>
+  mutate(stan_contestant = as.integer(str_sub(stan_contestant, 17, -2))) |>
+  inner_join(
+    stan_contestants |>
+    select(stan_contestant, year, country = to_country, country_name)
+  ) |>
+  group_by(year, sim) |>
+  mutate(is_winner = quality == max(quality)) |>
+  group_by(stan_contestant, year, country, country_name) |>
+  summarise(p_win = mean(is_winner)) |>
+  arrange(year, desc(p_win)) |>
+  ungroup() |>
+  select(year, country, country_name, p_win)
+```
+
+### Returns
+
+```{r}
+returns <-
+  bookmakers |>
+  filter(round == "final") |>
+  group_by(year, bookmaker) |>
+  mutate(p = (1 / odds) / sum(1 / odds, na.rm = TRUE)) |>
+  inner_join(win_probs) |>
+  summarise(
+    margin = log(sum(1 / odds, na.rm = TRUE)),
+    bookmaker_profit = 1 - sum(p * odds * p_win, na.rm = TRUE),
+    naive = sum(odds * (odds == min(odds)) * p_win, na.rm = TRUE),
+    R0 = max(odds * p_win, na.rm = TRUE),
+    R1 = sum(odds * p_win^2, na.rm = TRUE),
+    separation = max(1 - p / p_win, na.rm = TRUE),
+    quad_score = sum((p - p_win)^2, na.rm = TRUE),
+    log_score = sum(p_win * log(p_win / p), na.rm = TRUE),
+    log_return = log_score - margin
+  )
+```
+
+```{r}
+returns |> ggplot(aes(100 * margin)) + geom_dotplot(binwidth = 2)
+```
+
+```{r}
+returns |>
+  #
+  # ggplot(aes(log_score, R1, colour = factor(year))) +
+  # geom_point()
+  #
+  select(
+    year,
+    bookmaker,
+    Gross = log_score,
+    Net = log_return
+  ) |>
+  pivot_longer(Gross:Net, names_to = "type", values_to = "return") |>
+  ggplot(aes(year, 100 * return, group = year, fill = factor(year))) +
+  geom_dotplot(
+    colour = NA,
+    binaxis = "y",
+    stackdir = "center",
+    binwidth = 2
+  ) +
+  scale_x_continuous(breaks = 2015:2022) +
+  scale_y_continuous(limits = c(0, NA)) +
+  scale_fill_discrete(guide = NULL) +
+  labs(x = NULL, y = "Log Return (%)") +
+  facet_wrap(~ type, ncol = 2)
+  #
+  # group_by(year) |>
+  # summarise(log_score = median(log_score), log_return = median(log_return)) |>
+  # summarise(log_score = mean(log_score), log_return = mean(log_return))
+```
+
+## Simulate exploded and Rasch models
+
+These cells compare the exploded-logit approximation to a true Rasch model.
+We actually no longer need to do this, as we are not using the exploded-logit model.
+
+```{r}
+#| eval: false
+comparison_model <-
+  cmdstan_model(
+    "inst/stan/exploded-error.stan",
+    stanc_options = list("O1")
+  )
+comparison_fit <-
+  comparison_model$sample(
+    data = list(K = 25, I = 6),
+    fixed_param = TRUE,
+    chains = 8,
+    parallel_chains = 8,
+    iter_warmup = 0,
+    iter_sampling = 125,
+    refresh = 5
+  )
+```
