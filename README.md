@@ -1,16 +1,13 @@
-# Measuring the Eurovision Song Contest:A Living Dataset for Real-World MIR
+# Measuring the Eurovision Song Contest: A Living Dataset for Real-World MIR
 
 This repository contains the materials to reproduce results reported in:
 
 * [Measuring the Eurovision Song Contest: A Living Dataset for Real-World MIR]()
 
-To access the repository that is used to manage and update the original dataset, please visit [the eurovision-dataset repository](https://github.com/Spijkervet/eurovision-dataset)
+To access the repository that is used to manage and update the original dataset, please visit 
 
-The repository contains three categories:
+* [the eurovision-dataset repository](https://github.com/Spijkervet/eurovision-dataset).
 
-- Data 
-- Figures
-- Models
 
 ## Data 
 
@@ -18,7 +15,7 @@ Data that comprises the MIRoVision dataset originates from three primary sources
 
 1. [Official Eurovison website](https://eurovision.tv/)
 2. [Eurovision World fan website](https://eurovisionworld.com)
-3. audio features taken directly from the YouTube videos 
+3. audio features taken directly from the YouTube videos.
 
 The dataset contains five primary types of data: 
 
@@ -27,6 +24,14 @@ The dataset contains five primary types of data:
 3. voting data; 
 4. audio features extracted from recorded performances of the musical acts and 
 5. betting office data.
+
+### Contest Meta-Data
+
+> TODO 
+
+### Contest Results
+
+> TODO 
 
 ### Voting Data
 
@@ -38,6 +43,10 @@ The voting data is stored in three separate tables:
     - contains all metadata regarding each song entry, such as the artist's name and song title, lyrics, composers and lyricists, the running order and the total points awarded by the jury and televoters in the Semi-Final and Final Rounds respectively. This table also includes links to YouTube videos of live performances from the televised Finals or Semi-Finals, as maintained by the Eurovision World team.
 3. jurors.
     - contains data beginning from the year 2016 and indicates how the five anonymous jurors (designated with letter names A through E) voted for each other country and in which night of the contest.
+
+### Audio Features 
+
+> TODO
 
 ### Betting Office Data
 
