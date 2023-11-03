@@ -3,6 +3,8 @@ title: MIRoVision scripts
 author: John Ashley Burgoyne
 date: April 2023
 format: html
+editor_options: 
+  chunk_output_type: console
 ---
 
 This Quarto document conducts the analyses and generates the plots for Burgoyne, Spijkervet, and Baker's (2023) MIRoVision paper.
@@ -42,14 +44,17 @@ options(
 
 ## Load data
 
-The raw data is in RDA format, with the eventual goal of making an R package.
 
 ```{r}
-# TODO: These should be normalised
+
 countries <- readRDS("data/countries.rda")
+
 contestants <- readRDS("data/contestants.rda")
+
 votes <- readRDS("data/votes.rda")
+
 jurors <- readRDS("data/jurors.rda")
+
 ```
 
 We normalise the data and add integer primary keys for Stan, using order of appearance where possible, but we do not use them as the standard foreign key in other tables.
@@ -162,7 +167,6 @@ stan_performances <-
   mutate(stan_performance = dense_rank(pick(year, round, running_order))) |>
   arrange(stan_performance)
 
-###
 
 stan_points <-
   votes |>
@@ -185,7 +189,6 @@ stan_points <-
   group_by(year, round) |>
   mutate(stan_show = cur_group_id()) |>
   ungroup() |>
-
   arrange(year, to_country) |>
   group_by(year, to_country) |>
   mutate(stan_contestant = cur_group_id()) |>
@@ -200,6 +203,8 @@ stan_points <-
     points
   ) |>
   arrange(stan_ballot, desc(points))
+
+# TODO: can't find stan VOTE
 
 stan_votes <-
   stan_points |>
