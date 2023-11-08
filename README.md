@@ -4,6 +4,8 @@ This repository contains the materials to reproduce results reported in:
 
 * [Measuring the Eurovision Song Contest: A Living Dataset for Real-World MIR](https://ismir2023program.ismir.net/poster_276.html)
 
+* [Paper on ISMIR Archive](https://archives.ismir.net/ismir2023/paper/000097.pdf)
+
 To access the repository that is used to manage and update the original dataset, please visit 
 
 * [the eurovision-dataset repository](https://github.com/Spijkervet/eurovision-dataset).
