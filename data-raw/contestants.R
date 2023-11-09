@@ -45,5 +45,5 @@ contestants <-
     final_total_points = points_final
   )
 
-write_csv(contestants, "inst/extdata/contestants.csv")
-saveRDS(contestants, file = "data/contestants.rda")
+write_csv(contestants, "data/CSV/contestants.csv")
+saveRDS(contestants, file = "data/RDA/contestants.rda")

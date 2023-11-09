@@ -31,5 +31,5 @@ votes <-
   ) |>
   filter(to_country != from_country)
 
-write_csv(votes, "inst/extdata/votes.csv")
-saveRDS(votes, file = "data/votes.rda")
+write_csv(votes, "data/CSV/votes.csv")
+saveRDS(votes, file = "data/RDA/votes.rda")

@@ -4,7 +4,7 @@ library(countrycode)
 
 # TODO: What to do about qualify vs. win?
 
-contestants <- readRDS("data/contestants.rda")
+contestants <- readRDS("data/RDA/contestants.rda")
 
 bookmakers <-
   read_csv(
@@ -30,5 +30,5 @@ bookmakers <-
     odds = betting_score
   )
 
-write_csv(bookmakers, "inst/extdata/bookmakers.csv")
-saveRDS(bookmakers, file = "data/bookmakers.rda")
+write_csv(bookmakers, "data/CSV/bookmakers.csv")
+saveRDS(bookmakers, file = "data/RDA/bookmakers.rda")

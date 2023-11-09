@@ -58,5 +58,5 @@ jurors <-
       countrycode("country.name.en", "ecb")
   )
 
-write_csv(jurors, 'inst/extdata/jurors.csv')
-saveRDS(jurors, file = 'data/jurors.rda')
+write_csv(jurors, 'data/CSV/jurors.csv')
+saveRDS(jurors, file = 'data/RDA/jurors.rda')
