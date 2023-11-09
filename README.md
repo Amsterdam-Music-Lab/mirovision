@@ -13,46 +13,43 @@ To access the repository that is used to manage and update the original dataset,
 
 ## Data 
 
-Data that comprises the MIRoVision dataset originates from three primary sources:
+Data that comprise the MIRoVision dataset originates from three primary sources:
 
 1. [Official Eurovison website](https://eurovision.tv/)
 2. [Eurovision World fan website](https://eurovisionworld.com)
-3. audio features taken directly from the YouTube videos.
+3. audio features taken directly from the final live performances.
 
 The dataset contains five primary types of data: 
 
 1. contest meta-data; 
 2. contest results; 
 3. voting data; 
-4. audio features extracted from recorded performances of the musical acts and 
-5. betting office data.
+4. audio features extracted from recorded performances of the musical acts; and 
+5. betting-office (bookmakers') data.
 
-### Contest Meta-Data
+We provide CSV and RDS (R data) formats.
 
-Contest data is stored as an `.RDA` file in `data`.
+### Contest Meta-Data and Results
 
-### Contest Results
-
-Contest data is stored as an `.RDA` file in `data`.
+Contest meta-data and results are available in `contestants.csv` and `contestants.rda` in the `data` folder.
+In addition to the song and performer from each country and year, the meta-data includes composers, lyricists, lyrics, running order, and a link to the YouTube video of the final performance (as maintained by the Eurovision World team).
 
 ### Voting Data
 
-The voting data is stored in three separate tables:
+The voting data is stored in two separate tables.
 
-1. votes; 
-    - contains data from the contest's beginning in 1956 and indicates how each country's aggregated jury and televoting points were distributed to each other participating country.
-2. contestants; and 
-    - contains all metadata regarding each song entry, such as the artist's name and song title, lyrics, composers and lyricists, the running order and the total points awarded by the jury and televoters in the Semi-Final and Final Rounds respectively. This table also includes links to YouTube videos of live performances from the televised Finals or Semi-Finals, as maintained by the Eurovision World team.
-3. jurors.
-    - contains data beginning from the year 2016 and indicates how the five anonymous jurors (designated with letter names A through E) voted for each other country and in which night of the contest.
+  - The `votes` table contains data from the contest's beginning in 1956 and indicates how each country's jury and televoting points were distributed to each other participating country.
+  
+  - The `jurors` table contains data beginning from the year 2016 and indicates how each the five anonymous jurors *within* each country's jury (designated with letter names A through E) ranked the performances. Note that individual jurors are required to rank every performance during a show except the performance from their own country: the well-known 12–10–8–7–6–5–4–3–2–1 point system is derived after averaging the full rankings of each country's jurors. 
 
 ### Audio Features 
 
-To reproduce the audio features used in the paper, navigate to [the dataset repository](https://github.com/Spijkervet/eurovision-dataset) and follow the instructions under the [Audio Features](https://github.com/Spijkervet/eurovision-dataset#audio-features) heading.  
+Although the MERT features are proprietary, we provide the TUNe+ features used in the paper in the `tune_plus` table.
+It is also possible to compute Essentia features by navigating to [the dataset repository](https://github.com/Spijkervet/eurovision-dataset) and following the instructions under the [Audio Features](https://github.com/Spijkervet/eurovision-dataset#audio-features) heading.  
 
 ### Betting Office Data
 
-In addition to the voting tables, the betting-offices table provide tables of historical bookmakers' odds for the contest winners, as collected by Eurovision World.
+In addition to the voting tables, the `bookmakers` table provides tables of historical bookmakers' odds for the contest winners, as collected by Eurovision World.
 The Eurovision Song Contest is a popular target for online betting.
 Day-of-contest odds are available for 2016 and 2017, and daily odds up to six months prior to the contest are available from 2018 onward, for between 10 and 20 betting offices.
 
@@ -86,7 +83,7 @@ Ideal scores for averaging ranks within juries, according to a generalised parti
 
 ## Modeling Code
 
-The models used in the paper can be found under `inst/stan`. We plan to incorporate these models into an R package soon. 
+The models used in the paper can be found under `stan`. 
 
 ## Cite
 
@@ -96,15 +93,13 @@ When using these materials please the following resources:
 
 ```
 
-@misc{burgyone_mirovision,
+@inproceedings{burgoyne_mirovision,
     author       = {John Ashley Burgoyne and Janne Spijkervet and David John Baker},
-    title        = {{Measuring the Eurovision Song Contest: A Living Dataset for Real-World MIR},
-    month        = nov,
+    title        = {Measuring the {Eurovision Song Contest}: A Living Dataset for Real-World {MIR}},
+    booktitle    = {Proceedings of the 24th International Society for Music Information Retrieval Conference},
     year         = 2023,
-    doi          = {TBD},
-    version      = {TBD},
-    publisher    = {Zenodo},
-    url          = {TBD}
+    address      = {Milan, Italy},
+    url          = {https://archives.ismir.net/ismir2023/paper/000097.pdf}
 }
 
 ```
@@ -115,7 +110,7 @@ When using these materials please the following resources:
 
 @misc{spijkervet_eurovision,
     author       = {Janne Spijkervet},
-    title        = {{The Eurovision Dataset}},
+    title        = {The {Eurovision} Dataset},
     month        = mar,
     year         = 2020,
     doi          = {10.5281/zenodo.4036457},
