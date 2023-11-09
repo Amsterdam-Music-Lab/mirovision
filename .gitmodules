@@ -1,0 +1,3 @@
+[submodule "eurovision-dataset"]
+	path = eurovision-dataset
+	url = git@github.com:Spijkervet/eurovision-dataset.git

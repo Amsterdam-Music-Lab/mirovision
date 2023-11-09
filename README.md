@@ -29,6 +29,11 @@ The dataset contains five primary types of data:
 
 We provide CSV and RDS (R data) formats.
 
+To download and process the raw data, the repository's submodules will need to be fetched as well:
+```bash
+git submodule update --init --recursive
+```
+
 ### Contest Meta-Data and Results
 
 Contest meta-data and results are available in `contestants.csv` and `contestants.rda` in the `data` folder.
